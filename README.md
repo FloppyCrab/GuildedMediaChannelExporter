@@ -29,7 +29,7 @@ the JSON format is as follows:
       "createdBy": "comment creator",
       "message": "the comment message"
     }
-  }
+  ]
 }
 ```
 
