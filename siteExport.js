@@ -13,8 +13,6 @@ async function getSiteData(channelName) {
         let backupAmount = 200;
         let delayAmount = 4000;
         let delayAddition = 2;
-        // porn position
-        // let startOffset = 1400;
         let startOffset = 0;
         let noBackups = (startOffset == 0)
             ? 0
