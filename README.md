@@ -34,3 +34,6 @@ the JSON format is as follows:
 ```
 
 images and videos posted into comments will also be saved
+
+## Downloading the media
+This will be a separate NodeJS program that will be uploaded once finished
