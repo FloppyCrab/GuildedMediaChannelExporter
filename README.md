@@ -36,4 +36,5 @@ the JSON format is as follows:
 images and videos posted into comments will also be saved
 
 ## Downloading the media
-This will be a separate NodeJS program that will be uploaded once finished
+~~This will be a separate NodeJS program that will be uploaded once finished~~
+This now downloads as it iterates through, since i found that the links expired quickly after being saved
