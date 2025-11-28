@@ -1,4 +1,4 @@
-async function getSiteData(channelName) {
+async function getSiteData(channelName, startOffset = null) {
     let posts = [];
     try {
         // get the currently active container
@@ -10,21 +10,21 @@ async function getSiteData(channelName) {
         // This would have us jumping all over the place and generally break it
 
 
-        let backupAmount = 200;
+        let backupAmount = 50;
         let delayAmount = 4000;
-        let delayAddition = 2;
-        let startOffset = 0;
-        let noBackups = (startOffset == 0)
-            ? 0
-            : Math.floor((startOffset/backupAmount)-1);
-
+        let delayAddition = 1;
 
         // +40 is required since it will otherwise have the offset amount loaded, on the current offset one, then not save any, which isn't ideal
-        while(curContainer.childNodes.length < (startOffset > 0) ? (startOffset + 40) : 0) {
-            console.log(`scrolling to: ${curContainer.childNodes.length}`);
-            curContainer.childNodes[curContainer.childNodes.length -1].scrollIntoView();
-            await sleep(2000);
+        if(startOffset) {
+            while(curContainer.childNodes.length < (startOffset + 40)) {
+                console.log(`scrolling to: ${curContainer.childNodes.length}`);
+                curContainer.childNodes[curContainer.childNodes.length -1].scrollIntoView();
+                await sleep(4000);
+            }
+        } else {
+            startOffset = 0;
         }
+        
 
         console.log(`scrolled with ${curContainer.childNodes.length} posts in view`);
 
@@ -55,7 +55,7 @@ async function getSiteData(channelName) {
                 ? postTitleElement.innerText
                 : "";
 
-            //* MAIN MEDIA SECTIOn
+            //* MAIN MEDIA SECTION
             let mainMediaSection = document.querySelector('.MediaPreviewer-container.MediaSplitView-preview');
             // let mediaElement = (mainMediaSection.classList.contains('MediaPreviewer-container-is-raw-video'))
             //     ? mainMediaSection.querySelector('video')
@@ -64,12 +64,21 @@ async function getSiteData(channelName) {
             let mediaElement = mainMediaSection.querySelector('video,img,canvas,iframe');
 
 
+
             if (mediaElement == null) throw new Error(`Issue with element: ${mainMediaSection}`);
             let mainMediaURL = (mediaElement.src)
                 ? mediaElement.src
                 // gifs are canvases with a custom attribute of src for some reason
                 // rather than just being a img with an src of a gif, i don't get this
-                : mediaElement.attributes.src;
+                : mediaElement.attributes.src.value;
+
+            let attachmentName = "tmp";
+            if(mediaElement.nodeName == "iframe") {
+                attachmentName = mainMediaURL;
+            } else {
+                attachmentName = getMediaName(mainMediaURL);
+                await downloadMedia(mainMediaURL, attachmentName);
+            }
 
             //* COMMENT SECTION
             let commentSection = document.querySelector('.RepliesAddon-container');
@@ -83,9 +92,24 @@ async function getSiteData(channelName) {
                 let commentMessage = Array.from(commentContainer[j].querySelectorAll('.BlockTextRendererV2-container,.MediaRendererV2-container'))
                     // .map((row) => row.innerText)
                     .map((row) => {
-                        return (row.classList.contains("BlockTextRendererV2-container"))
-                            ? row.innerText
-                            : `![](${row.querySelector('img,video').src})`;
+
+                        if(row.classList.contains("BlockTextRendererV2-container")) {
+                            // text comment
+                            return row.innerText
+                        } else {
+                            let commentMediaURL = row.querySelector('img,video').src;
+                            let commentMediaName = getMediaName(commentMediaURL);
+                            // map doesn't work asyncronously
+                            downloadMedia(commentMediaURL, commentMediaName);
+                            return `![](${commentMediaName})`;
+                        }
+
+                        // let commentMediaName = getMediaName()
+                        // downloadMedia()
+
+                        // return (row.classList.contains("BlockTextRendererV2-container"))
+                        //     ? row.innerText
+                        //     : `![](${row.querySelector('img,video').src})`;
                     })
                     .reduce((acc,val) => `${acc}\n${val}`);
 
@@ -101,28 +125,30 @@ async function getSiteData(channelName) {
                 "postId": i,
                 "createdBy": postCreator,
                 "title": postTitle,
-                "main": mainMediaURL,
+                "main": attachmentName,
                 "replies": postComments
             });
 
 
-            // base case when testing
-            // Will have some dynamic loading, some scrolling, good amount
-            // if(i==100) break;
+            
 
-            if(i != 0 && i% backupAmount == 0) {
+            if((i > 1) && (i % backupAmount) == (backupAmount-1)) {
                 let encodedPosts = "data:text/json;charset=utf8," + encodeURIComponent(JSON.stringify(posts));
+
+                let startingId = posts[0].postId;
 
                 let tmpEl = document.createElement('a');
                 tmpEl.setAttribute('href', encodedPosts);
-                tmpEl.setAttribute("download", `export-${channelName}${backupAmount * noBackups}.json`);
+                tmpEl.setAttribute("download", `ZZ-export-${channelName}${startingId}.json`);
                 tmpEl.click();
-
-                noBackups += 1;
 
                 // reset it to save memory
                 posts = [];
             }
+
+            // base case when testing
+            // Will have some dynamic loading, some scrolling, good amount
+            // if(i==1) break;
         }
 
         // save whatever's left in the spout
@@ -131,7 +157,7 @@ async function getSiteData(channelName) {
 
             let tmpEl = document.createElement('a');
             tmpEl.setAttribute('href', encodedPosts);
-            tmpEl.setAttribute("download", `export-${channelName}Last.json`);
+            tmpEl.setAttribute("download", `ZZ-export-${channelName}Last.json`);
             tmpEl.click();
         }
 
@@ -146,7 +172,7 @@ async function getSiteData(channelName) {
 
             let tmpEl = document.createElement('a');
             tmpEl.setAttribute('href', encodedPosts);
-            tmpEl.setAttribute("download", `export-${channelName}Error.json`);
+            tmpEl.setAttribute("download", `ZZ-export-${channelName}Error.json`);
             tmpEl.click();
         console.log(posts);
         console.error(err);
@@ -155,6 +181,26 @@ async function getSiteData(channelName) {
 
 }
 
+function getMediaName(mainMediaURL) {
+    return (mainMediaURL.includes("gldcdn.com"))
+            ? (mainMediaURL.includes("https://cdn.gldcdn.com/ContentMedia"))
+                ? (mainMediaURL.includes("https://cdn.gldcdn.com/ContentMediaGenericFiles/"))
+                    ? mainMediaURL.split("ContentMediaGenericFiles/")[1].split("?")[0]
+                    : mainMediaURL.split("ContentMedia/")[1].split("?")[0]
+                : mainMediaURL.split("MediaChannelUpload/")[1].split("?")[0]
+            : mainMediaURL.split("/").pop();
+}
+
+async function downloadMedia(url, name) {
+    await fetch(url).then((data) => data.blob()).then((blob) => {
+        const newUrl = URL.createObjectURL(blob);
+        const tmpEl = document.createElement("a");
+        tmpEl.href = newUrl;
+        tmpEl.download = name;
+        tmpEl.click();
+        URL.revokeObjectURL(url);
+    });
+}
 
 function sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
