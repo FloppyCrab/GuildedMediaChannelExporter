@@ -11,33 +11,46 @@ async function getSiteData(channelName, startOffset = null, stopAfter = null) {
 
 
         let backupAmount = 50;
-        let delayAmount = 3500;
-        let delayAddition = 1;
+        let delayAmount = 100;
+        let delayAddition = 0.5;
 
         // +40 is required since it will otherwise have the offset amount loaded, on the current offset one, then not save any, which isn't ideal
         if(startOffset) {
-            while(curContainer.childNodes.length < (startOffset + backupAmount + 1)) {
-                console.log(`scrolling to: ${curContainer.childNodes.length}`);
-                curContainer.childNodes[curContainer.childNodes.length -1].scrollIntoView();
-                await sleep(4000);
-            }
+            // while(curContainer.childNodes.length < (startOffset + backupAmount + 1)) {
+            //     console.log(`scrolling to: ${curContainer.childNodes.length}`);
+            //     curContainer.childNodes[curContainer.childNodes.length -1].scrollIntoView();
+            //     await sleep(3000);
+            // }
+            await scrollToPost(curContainer, startOffset, backupAmount);
         } else {
             startOffset = 0;
+        }
+
+        if(stopAfter) {
+            stopAfter = startOffset + stopAfter;
+        } else {
+            // very big number, no doubt won't get that far
+            stopAfter = 1000000;
         }
         
 
         console.log(`scrolled with ${curContainer.childNodes.length} posts in view`);
         let allDownloaded = false;
+        window.continueSiteData = true;
 
-        while(!allDownloaded) {
+        while(!allDownloaded && window.continueSiteData) {
             let iterablePosts = Array.from(curContainer.childNodes).slice(startOffset, (startOffset + backupAmount));
-            await downloadRange(backupAmount, startOffset, delayAmount, delayAddition, channelName, iterablePosts, posts);
+            let tmp = await downloadRange(backupAmount, startOffset, delayAmount, delayAddition, channelName, iterablePosts, posts);
+            tmp = null;
             if(posts[posts.length-1].postId >= (curContainer.length- 1))
                 allDownloaded = true;
 
             startOffset += iterablePosts.length;
             // reset it to save memory
             posts = [];
+            // window.continueSiteData = false;
+
+            if(startOffset >= stopAfter) window.continueSiteData = false;
         }
 
         
@@ -56,6 +69,9 @@ async function getSiteData(channelName, startOffset = null, stopAfter = null) {
             // delete(tmpEl);
         }
 
+        posts = null;
+        curContainer = null;
+
 
 
         // let URI = encodeURI(JSON.stringify(posts));
@@ -73,6 +89,28 @@ async function getSiteData(channelName, startOffset = null, stopAfter = null) {
         console.error(err);
 
         posts = null;
+        tmpEl = null;
+
+    }
+}
+
+async function scrollAndOpenPost(postNo) {
+    let curContainer = Array.from(document.querySelectorAll('.MasonryGrid-container.MediaGridV2-container'))
+        // should only be one of them
+        .filter((row) => row.closest('.LayerContext-layer-hidden') == null)[0];
+
+    await scrollToPost(curContainer, postNo, 1);
+
+    curContainer.childNodes[postNo].childNodes[0].click();
+
+    curContainer = null;
+}
+
+async function scrollToPost(curContainer, startOffset, backupAmount) {
+    while(curContainer.childNodes.length < (startOffset + 1)) {
+        console.log(`scrolling to: ${curContainer.childNodes.length}`);
+        curContainer.childNodes[curContainer.childNodes.length -1].scrollIntoView();
+        await sleep(3250);
     }
 }
 
@@ -93,7 +131,7 @@ function getMediaName(mainMediaURL) {
 }
 
 async function downloadMedia(url, name) {
-    await fetch(url).then((data) => data.blob()).then((blob) => {
+    let req = await fetch(url).then((data) => data.blob()).then((blob) => {
         let newUrl = URL.createObjectURL(blob);
         let tmpEl = document.createElement("a");
         tmpEl.href = newUrl;
@@ -107,10 +145,57 @@ async function downloadMedia(url, name) {
         blob = null;
         newUrl - null;
     });
+
+    req = null;
 }
 
 function sleep(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
+    return new Promise(resolve => {
+        let timeout = setTimeout(() => {
+            resolve();
+            clearTimeout(timeout);
+            timeout = null;
+        }, ms);
+    });
+}
+
+function waitForMediaLoad(element) {
+    if(!['CANVAS', 'IMG', 'VIDEO', 'IFRAME'].includes(element.nodeName)) return;
+
+    return new Promise((resolve, reject) => {
+        let listener;
+        switch (element.nodeName) {
+            case "VIDEO":
+                listener = element.addEventListener("canplay", (e) => {
+                    resolve();
+                });
+                break;
+            case "IMG":
+                if(element.complete) {
+                    resolve();
+                    break;
+                }
+            default:
+                listener = element.addEventListener("load", (e) => {
+                    resolve();
+                })
+                break;
+        }
+        element.removeEventListener(listener);
+    //     if(element.nodeName == "VIDEO") {
+    //         element.addEventListener("canplay", (e) => {
+    //             resolve();
+    //         });
+    //     }
+
+    //     element.addEventListener('load',() => {
+    //         resolve();
+    //     });
+    //     setTimeout(() => {
+    //         if(element.complete) resolve();
+    //         else reject("timeout");
+    //     }, 500);
+    });
 }
 
 
@@ -125,7 +210,8 @@ async function downloadRange(backupAmount, startOffset, delayAmount, delayAdditi
         let overallIndex = (i + startOffset);
 
         // give it time to load the post, images are the issue, videos are able to be streamed
-        await sleep(delayAmount + (overallIndex * delayAddition));
+        // await sleep(delayAmount + (overallIndex * delayAddition));
+        await sleep(250);
         console.log(`post ${i} of ${iterablePosts.length} in current batch`);
 
         //* CREATED BY
@@ -147,8 +233,41 @@ async function downloadRange(backupAmount, startOffset, delayAmount, delayAdditi
 
         let mediaElement = mainMediaSection.querySelector('video,img,canvas,iframe');
 
-
         if (mediaElement == null) throw new Error(`Issue with element: ${mainMediaSection}`);
+        await waitForMediaLoad(mediaElement);
+        await sleep(250);
+        if(["CANVAS", "IMG"].includes(mediaElement.nodeName)) {
+            // console.log(mediaElement);
+            // while(mediaElement.attributes?.src?.value.indexOf(".webp") != -1
+            //     || mediaElement.src?.indexOf(".webp") != -1) await sleep(250);
+            let stopWaiting = false;
+            let timeout = setTimeout(() => {
+                // console.log(mediaElement);
+                // throw new Error("timed out waiting for the image to load");
+                stopWaiting = true;
+            }, 5000);
+            if(mediaElement.nodeName == "CANVAS")
+                while (!mediaElement.attributes.src.value.includes(".webp") && !stopWaiting) await sleep(250);
+            if(mediaElement.nodeName == "IMG")
+                while (!mediaElement.src.includes(".webp") && !stopWaiting) await sleep(250);
+            // re-get the reference just in case
+            if(stopWaiting) mediaElement = mainMediaSection.querySelector('video,img,canvas,iframe');
+
+            // if(mediaElement.nodeName == "CANVAS") {
+            //     // console.log("canvas");
+            //     // console.log(mediaElement.attributes.src.value.indexOf(".webp"));
+            //     // while(mediaElement.attributes.src.value.indexOf)
+            // }
+            // if(mediaElement.nodeName == "IMG") {
+            //     console.log("img");
+            //     console.log(mediaElement.src.indexOf(".webp"));
+            // }
+
+            clearTimeout(timeout);
+            timeout = null;
+        }
+        // await sleep(delayAmount + Math.floor(overallIndex * delayAddition));
+        if(mediaElement.nodeName == "VIDEO") mediaElement.pause();
         let mainMediaURL = (mediaElement.src)
             ? mediaElement.src
             // gifs are canvases with a custom attribute of src for some reason
@@ -169,6 +288,16 @@ async function downloadRange(backupAmount, startOffset, delayAmount, delayAdditi
 
         let postComments = [];
 
+        let mediaComments = commentSection.querySelectorAll("img,video,canvas");
+        let loadPromises = [];
+        mediaComments.forEach((el) => {
+            loadPromises.push(waitForMediaLoad(el));
+        });
+
+        await Promise.all(loadPromises);
+        loadPromises = null;
+        mediaComments = null;
+
         // Iterate through all the comments, this will also need to be done synchronously
         for(let j=0; j<commentContainer.length; j++) {
             let commentCreator = commentContainer[j].querySelector('.TeamWidgetProfileDetails-name-actions').textContent;
@@ -180,7 +309,10 @@ async function downloadRange(backupAmount, startOffset, delayAmount, delayAdditi
                         // text comment
                         return row.innerText
                     } else {
-                        let commentMediaURL = row.querySelector('img,video').src;
+                        let commentMediaElement = row.querySelector('img,video,canvas');
+                        let commentMediaURL = (commentMediaElement.nodeName == "CANVAS")
+                            ? commentMediaElement.attributes.src.value
+                            : commentMediaElement.src;
                         let commentMediaName = `${String(overallIndex).padStart(5,'0')}-${String(j).padStart(2,'0')}-${getMediaName(commentMediaURL)}`;
                         // map doesn't work asyncronously
                         downloadMedia(commentMediaURL, commentMediaName);
@@ -201,7 +333,7 @@ async function downloadRange(backupAmount, startOffset, delayAmount, delayAdditi
         }
 
         // wait another 500 milliseconds just in case
-        await sleep(500);
+        // await sleep(500);
 
         // format it correctly
         posts.push({
@@ -212,7 +344,10 @@ async function downloadRange(backupAmount, startOffset, delayAmount, delayAdditi
             "replies": postComments
         });
 
-
+        postCreator = null;
+        postTitle = null;
+        attachmentName = null;
+        postComments = null;
         
 
         if(i==(iterablePosts.length-1)) {
@@ -227,6 +362,11 @@ async function downloadRange(backupAmount, startOffset, delayAmount, delayAdditi
             tmpEl.setAttribute('href', encodedPosts);
             tmpEl.setAttribute("download", fileName);
             tmpEl.click();
+
+            encodedPosts = null;
+            startingId = null;
+            fileName = null;
+            tmpEl = null;
         }
 
         // base case when testing
